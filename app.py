@@ -97,26 +97,25 @@ def hitung_eoh(unit, df_jadwal):
     # ── Milestone EOH berikutnya (untuk progress bar)
     # EOH direset ke 0 setiap MO, partial reset di CI/HGPI
     # Gunakan current_eoh modulo siklus MO untuk progress bar
-    eoh_dalam_siklus = current_eoh % MILESTONE["MO"]
-    prev_ms = 0
-    next_ms_type = "MO"
-    next_ms_val  = MILESTONE["MO"]
-    for k, v in MILESTONE.items():
-        if eoh_dalam_siklus < v:
-            next_ms_type = k
-            next_ms_val  = v
-            break
-        prev_ms = v
+    next_ms_type = next_maint_type
+    sisa_eoh_ke_jadwal = max(0, (next_maint_date - today).days * 24) if next_maint_date else 0
+    eoh_terpakai = total_interval - sisa_eoh_ke_jadwal  # berapa EOH sudah terpakai dalam interval ini
+    persen = min(round(eoh_terpakai / total_interval * 100), 100) if total_interval > 0 else 0
 
-    range_ms = next_ms_val - prev_ms
-    persen   = min(round((eoh_dalam_siklus - prev_ms) / range_ms * 100), 100) if range_ms > 0 else 100
+    total_interval = MILESTONE.get(next_maint_type, MILESTONE["CI"])
+    if next_maint_date and total_interval > 0:
+        sisa_eoh = max(0, (next_maint_date - today).days * 24)
+        eoh_terpakai = max(0, total_interval - sisa_eoh)
+        persen = min(round(eoh_terpakai / total_interval * 100), 100)
+    else:
+        persen = 0
     bar_color = "#ef4444" if persen >= 85 else "#f59e0b" if persen >= 65 else "#22c55e"
+    next_ms_type = next_maint_type  # dari jadwal sheet
 
     return {
         "unit":              unit,
         "current_EOH":       current_eoh,
-        "eoh_dalam_siklus":  eoh_dalam_siklus,
-        "next_ms_type":      next_ms_type,
+        "next_ms_type":      next_maint_type,
         "persentase":        persen,
         "bar_color":         bar_color,
         "sisa_hari":         sisa_hari_jadwal,   # dari tanggal jadwal, bukan EOH
