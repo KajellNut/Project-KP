@@ -7,9 +7,9 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
 # ── KONFIGURASI ────────────────────────────────────────────────────
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1Vf52c3pH_y2axVQoSv-93irhAWqBTNAG2tsf-0jm44s/export?format=csv&gid=0"
-JADWAL_URL = "https://docs.google.com/spreadsheets/d/1Vf52c3pH_y2axVQoSv-93irhAWqBTNAG2tsf-0jm44s/export?format=csv&gid=901270521"
-N8N_WEBHOOK_URL = "https://kajellnut.app.n8n.cloud/webhook/prediction-trigger"
+SHEET_URL       = st.secrets["SHEET_URL"]
+JADWAL_URL      = st.secrets["JADWAL_URL"]  
+N8N_WEBHOOK_URL = st.secrets["N8N_WEBHOOK_URL"]
 
 BATAS_MW            = 90.0    # Batas minimum beban CT (MW) — spec PLN MCTN
 BATAS_HRSG_FALLBACK = 7000.0  # Fallback HRSG jika data kurang
