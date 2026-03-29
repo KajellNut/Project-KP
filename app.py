@@ -32,20 +32,13 @@ def parse_tgl(s):
             pass
     return None
 
+import re as _re
+
 # ── HELPER: EKSTRAK EOH AKTUAL DARI keterangan_scope ──────────────
 def ekstrak_eoh_dari_keterangan(keterangan):
-    """
-    Ekstrak angka EOH aktual dari string seperti:
-    "40,760 EOH (127%) Generator Rotor Replacement"
-    "18,720 EOH (117%)"
-    "15,984 EOH (100%)"
-    Return float atau None jika tidak ditemukan.
-    """
-    import re
     if not keterangan or str(keterangan).strip() in ["", "-", "nan"]:
         return None
-    # Cari pola angka sebelum kata EOH
-    match = re.search(r"([\d,\.]+)\s*EOH", str(keterangan), re.IGNORECASE)
+    match = _re.search(r"([\d,\.]+)\s*EOH", str(keterangan), _re.IGNORECASE)
     if not match:
         return None
     raw = match.group(1).replace(",", "").replace(".", "")
@@ -57,93 +50,80 @@ def ekstrak_eoh_dari_keterangan(keterangan):
 # ── HELPER: HITUNG EOH OTOMATIS ────────────────────────────────────
 def hitung_eoh(unit, df_jadwal):
     today = datetime.now(WIB).replace(tzinfo=None)
+
+    # Filter hanya baris unit ini yang punya tanggal_start_up valid
     unit_jadwal = df_jadwal[df_jadwal["unit"] == unit].copy()
     if unit_jadwal.empty:
         return None
 
-    unit_jadwal["_startup"] = unit_jadwal["tanggal_start_up"].apply(parse_tgl)
+    unit_jadwal["_startup"]  = unit_jadwal["tanggal_start_up"].apply(parse_tgl)
+    unit_jadwal["_shutdown"] = unit_jadwal["tanggal_shut_down"].apply(parse_tgl)
     unit_jadwal = unit_jadwal.dropna(subset=["_startup"])
     unit_jadwal = unit_jadwal.sort_values("_startup", ascending=False)
 
+    # Baris terakhir = maintenance yang paling baru selesai (unit sudah startup lagi)
     last = unit_jadwal.iloc[0]
+    startup_dt = last["_startup"]
 
-    # Cari EOH aktual saat shutdown dari keterangan_scope
-    # Format: "40,760 EOH (127%) Generator Rotor Replacement"
+    # EOH saat unit masuk maintenance = dari keterangan_scope
     eoh_saat_shutdown = ekstrak_eoh_dari_keterangan(last.get("keterangan_scope", ""))
-
-    # Fallback: jika keterangan kosong, gunakan target_EOH sebagai estimasi
     if eoh_saat_shutdown is None:
+        # Fallback: target_EOH (angka milestone, bukan EOH aktual)
         raw = str(last.get("target_EOH", "0")).strip().replace(",", "").replace(".", "")
         try:
-            eoh_saat_shutdown = float(raw) if raw and raw != "-" else 0
+            eoh_saat_shutdown = float(raw) if raw and raw not in ["-", ""] else 0
         except:
             eoh_saat_shutdown = 0
 
-    startup_dt = last["_startup"]
-    hari_jalan = max(0, (today - startup_dt).days)
-
-    # current_EOH = EOH saat unit kembali beroperasi (startup) + jam jalan sejak itu
+    # Jam operasi sejak startup terakhir
+    hari_jalan  = max(0, (today - startup_dt).days)
     current_eoh = round(eoh_saat_shutdown + hari_jalan * 24)
 
-    # target_EOH = milestone yang memicu maintenance ini (CI/HGPI/MO)
-    # Gunakan ini untuk tahu kita sudah di siklus keberapa
-    raw_target = str(last.get("target_EOH", "0")).strip().replace(",", "").replace(".", "")
-    try:
-        target_eoh_milestone = float(raw_target) if raw_target and raw_target != "-" else 0
-    except:
-        target_eoh_milestone = 0
+    # ── Cari jadwal maintenance BERIKUTNYA dari sheet (tanggal_shut_down > hari ini)
+    unit_jadwal["_shutdown"] = unit_jadwal["tanggal_shut_down"].apply(parse_tgl)
+    jadwal_depan = unit_jadwal[
+        unit_jadwal["_shutdown"].apply(lambda d: d is not None and d > today)
+    ].sort_values("_shutdown")
 
-    # Cari milestone BERIKUTNYA dari current_EOH
-    # Milestone berlaku berulang: CI → HGPI → MO → CI → HGPI → MO → ...
-    # Hitung berapa siklus MO sudah terlewati
-    siklus_mo = int(current_eoh // MILESTONE["MO"])
-    base       = siklus_mo * MILESTONE["MO"]
+    sisa_hari_jadwal = None
+    next_maint_type  = "N/A"
+    next_maint_date  = None
+    if not jadwal_depan.empty:
+        nxt             = jadwal_depan.iloc[0]
+        next_maint_date = nxt["_shutdown"]
+        next_maint_type = nxt.get("jenis_maintenance", "N/A")
+        sisa_hari_jadwal = max(0, (next_maint_date - today).days)
 
-    next_type   = None
-    next_target = None
+    # ── Milestone EOH berikutnya (untuk progress bar)
+    # EOH direset ke 0 setiap MO, partial reset di CI/HGPI
+    # Gunakan current_eoh modulo siklus MO untuk progress bar
+    eoh_dalam_siklus = current_eoh % MILESTONE["MO"]
+    prev_ms = 0
+    next_ms_type = "MO"
+    next_ms_val  = MILESTONE["MO"]
     for k, v in MILESTONE.items():
-        kandidat = base + v
-        if kandidat > current_eoh:
-            next_type   = k
-            next_target = kandidat
+        if eoh_dalam_siklus < v:
+            next_ms_type = k
+            next_ms_val  = v
             break
+        prev_ms = v
 
-    if next_type is None:
-        # Lewati semua dalam siklus ini, ke MO berikutnya
-        next_type   = "MO"
-        next_target = (siklus_mo + 1) * MILESTONE["MO"]
-
-    sisa_eoh  = max(0, next_target - current_eoh)
-    sisa_hari = round(sisa_eoh / 24)
-    persen    = min(round((current_eoh % MILESTONE["MO"] if next_type != "MO" else current_eoh % MILESTONE["MO"]) 
-                          / (next_target - base) * 100), 100) if next_target > base else 100
-
-    # Hitung persen lebih sederhana: progress menuju next_target dari base siklus
-    progress_start = base + (MILESTONE.get(
-        {"CI": None, "HGPI": "CI", "MO": "HGPI"}.get(next_type, "MO") or "CI",
-        0
-    ) if next_type != "CI" else 0)
-
-    # Persen = seberapa jauh current_eoh dari milestone sebelumnya ke milestone berikutnya
-    prev_milestone = {
-        "CI":   base,
-        "HGPI": base + MILESTONE["CI"],
-        "MO":   base + MILESTONE["HGPI"]
-    }.get(next_type, base)
-    range_milestone = next_target - prev_milestone
-    persen = min(round((current_eoh - prev_milestone) / range_milestone * 100), 100) if range_milestone > 0 else 100
+    range_ms = next_ms_val - prev_ms
+    persen   = min(round((eoh_dalam_siklus - prev_ms) / range_ms * 100), 100) if range_ms > 0 else 100
+    bar_color = "#ef4444" if persen >= 85 else "#f59e0b" if persen >= 65 else "#22c55e"
 
     return {
-        "unit": unit,
-        "current_EOH": current_eoh,
-        "eoh_saat_shutdown": eoh_saat_shutdown,
-        "next_milestone_type": next_type,
-        "next_milestone_target": next_target,
-        "sisa_EOH": sisa_eoh,
-        "sisa_hari": sisa_hari,
-        "persentase": persen,
-        "last_maintenance": last.get("jenis_maintenance", "N/A"),
-        "last_date": str(last.get("tanggal_shut_down", "N/A"))
+        "unit":              unit,
+        "current_EOH":       current_eoh,
+        "eoh_dalam_siklus":  eoh_dalam_siklus,
+        "next_ms_type":      next_ms_type,
+        "persentase":        persen,
+        "bar_color":         bar_color,
+        "sisa_hari":         sisa_hari_jadwal,   # dari tanggal jadwal, bukan EOH
+        "next_maint_type":   next_maint_type,
+        "next_maint_date":   next_maint_date.strftime("%d %b %Y") if next_maint_date else "N/A",
+        "last_maintenance":  last.get("jenis_maintenance", "N/A"),
+        "last_date":         str(last.get("tanggal_shut_down", "N/A"))
     }
 
 # ── HELPER: REGRESI LINEAR ─────────────────────────────────────────
@@ -419,7 +399,7 @@ for name, col in {**units_ct, **units_hrsg}.items():
         batas = BATAS_MW
     else:
         batas = hitung_batas_hrsg(df, col)
-    cur   = float(df[col].dropna().iloc[-1]) if not df[col].dropna().empty else 0
+    cur = float(df[col].dropna().iloc[-1]) if not df[col].dropna().empty else 0
 
     if cur <= 0:
         maint_words = ["maintenance","repair","s/d","har","inspeksi","hgpi","overhaul","shutdown"]
@@ -427,15 +407,25 @@ for name, col in {**units_ct, **units_hrsg}.items():
         results[name] = {"val": cur, "status": status, "days_left": "N/A", "slope": 0, "r2": 0, "y_trend": None}
     else:
         reg = hitung_regresi(df[col], batas)
+        # Jika beban aktual di bawah batas langsung KRITIS tanpa tunggu regresi
+        if cur < batas:
+            reg["status"] = "KRITIS"
         results[name] = {"val": cur, "status": reg["status"],
                          "days_left": reg["days_left"], "slope": reg["slope"],
                          "r2": reg["r2"], "y_trend": reg["y_trend"]}
 
-# EOH hanya untuk CT
+# EOH hanya untuk CT — lalu override status jika sisa jadwal maintenance mepet
 for unit in ["CT1","CT2","CT3"]:
     eoh = hitung_eoh(unit, df_jadwal)
     if eoh:
         eoh_data[unit] = eoh
+        sisa = eoh.get("sisa_hari")
+        if sisa is not None and results.get(unit, {}).get("status") not in ["MAINTENANCE", "OFF / TRIP"]:
+            if sisa <= 14:
+                results[unit]["status"] = "KRITIS"
+            elif sisa <= 30:
+                if results[unit]["status"] == "AMAN":
+                    results[unit]["status"] = "WARNING"
 
 # ── SECTION 1: STATUS UNIT ────────────────────────────────────────
 st.markdown('<p class="section-title">// STATUS UNIT PEMBANGKIT</p>', unsafe_allow_html=True)
@@ -455,22 +445,28 @@ for i, (name, col) in enumerate(units_ct.items()):
 
     eoh_bar = ""
     if eoh:
-        pct = eoh.get("persentase", 0)
-        bar_color = "#ef4444" if pct >= 90 else "#f59e0b" if pct >= 75 else "#22c55e"
-        eoh_bar = f"""
-        <div style="margin-top:12px;">
-            <div style="display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:#64748b;">
-                <span>EOH: {eoh.get('current_EOH','N/A'):,} jam</span>
-                <span>{pct}% → {eoh.get('next_milestone_type','N/A')}</span>
-            </div>
-            <div class="eoh-bar-bg">
-                <div class="eoh-bar-fill" style="width:{pct}%;background:{bar_color};"></div>
-            </div>
-            <div style="font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:#475569;">
-                Sisa ~{eoh.get('sisa_hari','N/A')} hari ke {eoh.get('next_milestone_type','N/A')}
-            </div>
-        </div>
-        """
+        pct       = eoh.get("persentase", 0)
+        bar_color = eoh.get("bar_color", "#22c55e")
+        sisa      = eoh.get("sisa_hari")
+        sisa_str  = f"~{sisa} hari" if sisa is not None else "N/A"
+        next_date = eoh.get("next_maint_date", "N/A")
+        next_type = eoh.get("next_maint_type", "N/A")
+        cur_eoh   = eoh.get("current_EOH", 0)
+        ms_type   = eoh.get("next_ms_type", "N/A")
+        eoh_bar = (
+            '<div style="margin-top:12px;">'
+            '<div style="display:flex;justify-content:space-between;font-family:\'IBM Plex Mono\',monospace;font-size:0.7rem;color:#64748b;">'
+            f'<span>EOH: {cur_eoh:,} jam</span>'
+            f'<span>{pct}% → {ms_type}</span>'
+            '</div>'
+            '<div class="eoh-bar-bg">'
+            f'<div class="eoh-bar-fill" style="width:{pct}%;background:{bar_color};"></div>'
+            '</div>'
+            f'<div style="font-family:\'IBM Plex Mono\',monospace;font-size:0.68rem;color:#475569;">'
+            f'Jadwal: {next_type} pada {next_date} (sisa {sisa_str})'
+            '</div>'
+            '</div>'
+        )
 
     val_str = "OFF" if val <= 0 else f"{val:.2f} MW"
 
@@ -500,18 +496,15 @@ for i, (name, col) in enumerate(units_hrsg.items()):
     status= r.get("status","N/A")
 
     with cols2[i]:
+        val_str2 = "OFF" if val <= 0 else f"{val:,.0f} TON"
         st.markdown(f"""
         <div class="card">
             <div class="card-accent" style="background:{color};"></div>
             <div style="padding-left:12px;">
                 <div class="card-unit">{name}</div>
-                <div class="card-val" style="color:{color};">
-                    {"OFF" if val <= 0 else f"{val:,.0f} TON"}
-                </div>
+                <div class="card-val" style="color:{color};">{val_str2}</div>
                 <div style="margin-top:6px;">
-                    <span class="badge" style="background:{color}22;color:{color};border:1px solid {color}44;">
-                        {status}
-                    </span>
+                    <span class="badge" style="background:{color}22;color:{color};border:1px solid {color}44;">{status}</span>
                 </div>
             </div>
         </div>
