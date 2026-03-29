@@ -4,7 +4,7 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 import requests
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # ── KONFIGURASI ────────────────────────────────────────────────────
 SHEET_URL       = st.secrets["SHEET_URL"]
@@ -13,6 +13,9 @@ N8N_WEBHOOK_URL = st.secrets["N8N_WEBHOOK_URL"]
 
 BATAS_MW            = 90.0    # Batas minimum beban CT (MW) — spec PLN MCTN
 BATAS_HRSG_FALLBACK = 7000.0  # Fallback HRSG jika data kurang
+
+# Timezone WIB = UTC+7
+WIB = timezone(timedelta(hours=7))
 
 # EOH Milestone PLN MCTN
 MILESTONE = {"CI": 15984, "HGPI": 31968, "MO": 63936}
@@ -29,9 +32,31 @@ def parse_tgl(s):
             pass
     return None
 
+# ── HELPER: EKSTRAK EOH AKTUAL DARI keterangan_scope ──────────────
+def ekstrak_eoh_dari_keterangan(keterangan):
+    """
+    Ekstrak angka EOH aktual dari string seperti:
+    "40,760 EOH (127%) Generator Rotor Replacement"
+    "18,720 EOH (117%)"
+    "15,984 EOH (100%)"
+    Return float atau None jika tidak ditemukan.
+    """
+    import re
+    if not keterangan or str(keterangan).strip() in ["", "-", "nan"]:
+        return None
+    # Cari pola angka sebelum kata EOH
+    match = re.search(r"([\d,\.]+)\s*EOH", str(keterangan), re.IGNORECASE)
+    if not match:
+        return None
+    raw = match.group(1).replace(",", "").replace(".", "")
+    try:
+        return float(raw)
+    except:
+        return None
+
 # ── HELPER: HITUNG EOH OTOMATIS ────────────────────────────────────
 def hitung_eoh(unit, df_jadwal):
-    today = datetime.today()
+    today = datetime.now(WIB).replace(tzinfo=None)
     unit_jadwal = df_jadwal[df_jadwal["unit"] == unit].copy()
     if unit_jadwal.empty:
         return None
@@ -41,21 +66,77 @@ def hitung_eoh(unit, df_jadwal):
     unit_jadwal = unit_jadwal.sort_values("_startup", ascending=False)
 
     last = unit_jadwal.iloc[0]
-    eoh_base    = float(str(last["target_EOH"]).replace(",", "").replace(".", "")) if last["target_EOH"] else 0
-    startup_dt  = last["_startup"]
-    hari_jalan  = max(0, (today - startup_dt).days)
-    current_eoh = round(eoh_base + hari_jalan * 24)
 
-    # Cari milestone berikutnya
-    next_type   = next((k for k, v in MILESTONE.items() if current_eoh < v), "MO")
-    next_target = MILESTONE[next_type]
-    sisa_eoh    = max(0, next_target - current_eoh)
-    sisa_hari   = round(sisa_eoh / 24)
-    persen      = min(round(current_eoh / next_target * 100), 100)
+    # Cari EOH aktual saat shutdown dari keterangan_scope
+    # Format: "40,760 EOH (127%) Generator Rotor Replacement"
+    eoh_saat_shutdown = ekstrak_eoh_dari_keterangan(last.get("keterangan_scope", ""))
+
+    # Fallback: jika keterangan kosong, gunakan target_EOH sebagai estimasi
+    if eoh_saat_shutdown is None:
+        raw = str(last.get("target_EOH", "0")).strip().replace(",", "").replace(".", "")
+        try:
+            eoh_saat_shutdown = float(raw) if raw and raw != "-" else 0
+        except:
+            eoh_saat_shutdown = 0
+
+    startup_dt = last["_startup"]
+    hari_jalan = max(0, (today - startup_dt).days)
+
+    # current_EOH = EOH saat unit kembali beroperasi (startup) + jam jalan sejak itu
+    current_eoh = round(eoh_saat_shutdown + hari_jalan * 24)
+
+    # target_EOH = milestone yang memicu maintenance ini (CI/HGPI/MO)
+    # Gunakan ini untuk tahu kita sudah di siklus keberapa
+    raw_target = str(last.get("target_EOH", "0")).strip().replace(",", "").replace(".", "")
+    try:
+        target_eoh_milestone = float(raw_target) if raw_target and raw_target != "-" else 0
+    except:
+        target_eoh_milestone = 0
+
+    # Cari milestone BERIKUTNYA dari current_EOH
+    # Milestone berlaku berulang: CI → HGPI → MO → CI → HGPI → MO → ...
+    # Hitung berapa siklus MO sudah terlewati
+    siklus_mo = int(current_eoh // MILESTONE["MO"])
+    base       = siklus_mo * MILESTONE["MO"]
+
+    next_type   = None
+    next_target = None
+    for k, v in MILESTONE.items():
+        kandidat = base + v
+        if kandidat > current_eoh:
+            next_type   = k
+            next_target = kandidat
+            break
+
+    if next_type is None:
+        # Lewati semua dalam siklus ini, ke MO berikutnya
+        next_type   = "MO"
+        next_target = (siklus_mo + 1) * MILESTONE["MO"]
+
+    sisa_eoh  = max(0, next_target - current_eoh)
+    sisa_hari = round(sisa_eoh / 24)
+    persen    = min(round((current_eoh % MILESTONE["MO"] if next_type != "MO" else current_eoh % MILESTONE["MO"]) 
+                          / (next_target - base) * 100), 100) if next_target > base else 100
+
+    # Hitung persen lebih sederhana: progress menuju next_target dari base siklus
+    progress_start = base + (MILESTONE.get(
+        {"CI": None, "HGPI": "CI", "MO": "HGPI"}.get(next_type, "MO") or "CI",
+        0
+    ) if next_type != "CI" else 0)
+
+    # Persen = seberapa jauh current_eoh dari milestone sebelumnya ke milestone berikutnya
+    prev_milestone = {
+        "CI":   base,
+        "HGPI": base + MILESTONE["CI"],
+        "MO":   base + MILESTONE["HGPI"]
+    }.get(next_type, base)
+    range_milestone = next_target - prev_milestone
+    persen = min(round((current_eoh - prev_milestone) / range_milestone * 100), 100) if range_milestone > 0 else 100
 
     return {
         "unit": unit,
         "current_EOH": current_eoh,
+        "eoh_saat_shutdown": eoh_saat_shutdown,
         "next_milestone_type": next_type,
         "next_milestone_target": next_target,
         "sisa_EOH": sisa_eoh,
@@ -306,7 +387,7 @@ except Exception as e:
     err_msg = str(e)
 
 # ── HEADER ────────────────────────────────────────────────────────
-now_str = datetime.now().strftime("%d %b %Y — %H:%M WIB")
+now_str = datetime.now(WIB).strftime("%d %b %Y — %H:%M WIB")
 st.markdown(f"""
 <div class="header-band">
     <p class="header-title">⚡ PLN MCTN — Predictive Maintenance System</p>
@@ -369,6 +450,8 @@ for i, (name, col) in enumerate(units_ct.items()):
     eoh   = eoh_data.get(name, {})
 
     dl_str = f"{dl} hari" if isinstance(dl, (int,float)) and dl < 999 else ("Stabil ↗" if dl == 999 else str(dl))
+    slope_str = f"Slope: {r.get('slope',0)} MW/hari" if r.get('slope',0) != 0 else ""
+    card_sub_text = f"Estimasi: {dl_str}" + (f"&nbsp;|&nbsp;{slope_str}" if slope_str else "")
 
     eoh_bar = ""
     if eoh:
@@ -389,24 +472,19 @@ for i, (name, col) in enumerate(units_ct.items()):
         </div>
         """
 
+    val_str = "OFF" if val <= 0 else f"{val:.2f} MW"
+
     with cols[i]:
         st.markdown(f"""
         <div class="card">
             <div class="card-accent" style="background:{color};"></div>
             <div style="padding-left:12px;">
                 <div class="card-unit">{name}</div>
-                <div class="card-val" style="color:{color};">
-                    {"OFF" if val <= 0 else f"{val:.2f} MW"}
-                </div>
+                <div class="card-val" style="color:{color};">{val_str}</div>
                 <div style="margin-top:6px;">
-                    <span class="badge" style="background:{color}22;color:{color};border:1px solid {color}44;">
-                        {status}
-                    </span>
+                    <span class="badge" style="background:{color}22;color:{color};border:1px solid {color}44;">{status}</span>
                 </div>
-                <div class="card-sub" style="margin-top:8px;">
-                    Estimasi: {dl_str}
-                    {"&nbsp;|&nbsp;Slope: " + str(r.get('slope',0)) + " MW/hari" if r.get('slope',0) != 0 else ""}
-                </div>
+                <div class="card-sub" style="margin-top:8px;">{card_sub_text}</div>
                 {eoh_bar}
             </div>
         </div>
@@ -565,19 +643,39 @@ if st.session_state.ai_results:
         advice = item.get("advice","Tidak ada saran.")
         dl     = item.get("days_left","N/A")
         color  = STATUS_COLOR.get(status, "#6b7280")
+        dl_str = f"{dl} hari" if isinstance(dl,(int,float)) and str(dl) != "N/A" else str(dl)
 
-        dl_str = f"{dl} hari" if isinstance(dl,(int,float)) and dl != "N/A" else str(dl)
+        # Pecah advice jadi poin-poin jika mengandung tanda titik atau newline
+        advice_lines = []
+        for part in advice.replace("\n", ". ").split(". "):
+            part = part.strip().strip("-").strip()
+            if len(part) > 10:
+                advice_lines.append(part)
+
+        # Render poin-poin advice
+        advice_html = ""
+        if len(advice_lines) > 1:
+            items_html = "".join([
+                f'<div style="display:flex;gap:8px;margin-bottom:6px;">'
+                f'<span style="color:{color};margin-top:2px;flex-shrink:0;">▸</span>'
+                f'<span>{line}{"." if not line.endswith(".") else ""}</span>'
+                f'</div>'
+                for line in advice_lines
+            ])
+            advice_html = f'<div style="margin-top:12px;">{items_html}</div>'
+        else:
+            advice_html = f'<div class="ai-advice">{advice}</div>'
 
         st.markdown(f"""
         <div class="ai-card">
-            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px;">
                 <span class="ai-unit-badge" style="color:{color};">⚡ {unit}</span>
                 <span class="badge" style="background:{color}22;color:{color};border:1px solid {color}44;">{status}</span>
                 <span style="font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:#475569;">
-                    Estimasi: {dl_str}
+                    Estimasi beban: {dl_str}
                 </span>
             </div>
-            <div class="ai-advice">{advice}</div>
+            {advice_html}
         </div>
         """, unsafe_allow_html=True)
 
