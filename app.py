@@ -434,6 +434,7 @@ for name in ["CT1", "CT2", "CT3"]:
         "slope":            r.get("slope", 0),
         "r2":               r.get("r2", 0),
         "current_EOH":      eoh.get("current_EOH", "N/A"),
+        "eoh_dalam_siklus": eoh.get("current_EOH", 0) % MILESTONE["MO"],
         "next_milestone":   eoh.get("next_ms_type", "N/A"),
         "sisa_hari_jadwal": eoh.get("sisa_hari", "N/A"),
         "next_maint_date":  eoh.get("next_maint_date", "N/A"),
