@@ -464,7 +464,7 @@ if run_ai:
                 "plant_summary":  batch_results,
                 "operator_notes": ket_payload
             }
-            resp = requests.post(N8N_WEBHOOK_URL, json=payload, timeout=120)
+            resp = requests.post(N8N_WEBHOOK_URL, json=payload, timeout=300)
             if resp.status_code == 200:
                 ai_raw = resp.json()
                 data   = ai_raw if isinstance(ai_raw, list) else ai_raw.get("data_tabel", [])
