@@ -473,43 +473,50 @@ if run_ai:
         except Exception as e:
             st.error(f"Koneksi ke n8n gagal: {e}")
 
+# Placeholder permanen untuk hasil AI
+ai_placeholder = st.empty()
+
 if st.session_state.ai_results:
-    st.success("✅ Analisis AI berhasil")
-    for item in st.session_state.ai_results:
-        unit   = item.get("unit", "N/A")
-        status = item.get("status", "N/A")
-        advice = item.get("advice", "Tidak ada saran.")
-        dl     = item.get("days_left", "N/A")
-        color  = STATUS_COLOR.get(status, "#6b7280")
-        dl_str = f"{dl} hari" if isinstance(dl, (int, float)) and str(dl) != "N/A" else str(dl)
+    with ai_placeholder.container():
+        st.success("✅ Analisis AI berhasil")
+        for item in st.session_state.ai_results:
+            unit   = item.get("unit", "N/A")
+            status = item.get("status", "N/A")
+            advice = item.get("advice", "Tidak ada saran.")
+            dl     = item.get("days_left", "N/A")
+            color  = STATUS_COLOR.get(status, "#6b7280")
+            dl_str = f"{dl} hari" if isinstance(dl, (int, float)) and str(dl) != "N/A" else str(dl)
 
-        lines = [p.strip().strip("-").strip()
-                 for p in advice.replace("\n", ". ").split(". ")
-                 if len(p.strip()) > 10]
+            lines = [p.strip().strip("-").strip()
+                     for p in advice.replace("\n", ". ").split(". ")
+                     if len(p.strip()) > 10]
 
-        if len(lines) > 1:
-            items_html = "".join(
-                '<div style="display:flex;gap:8px;margin-bottom:6px;">'
-                + f'<span style="color:{color};flex-shrink:0;">▸</span>'
-                + f'<span>{ln}{"." if not ln.endswith(".") else ""}</span>'
+            if len(lines) > 1:
+                items_html = "".join(
+                    '<div style="display:flex;gap:8px;margin-bottom:6px;">'
+                    + f'<span style="color:{color};flex-shrink:0;">▸</span>'
+                    + f'<span>{ln}{"." if not ln.endswith(".") else ""}</span>'
+                    + '</div>'
+                    for ln in lines
+                )
+                advice_html = f'<div style="margin-top:12px;">{items_html}</div>'
+            else:
+                advice_html = f'<div class="ai-advice">{advice}</div>'
+
+            st.markdown(
+                '<div class="ai-card">'
+                + '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px;">'
+                + f'<span class="ai-unit-badge" style="color:{color};">⚡ {unit}</span>'
+                + f'<span class="badge" style="background:{color}22;color:{color};border:1px solid {color}44;">{status}</span>'
+                + f'<span style="font-family:\'IBM Plex Mono\',monospace;font-size:0.72rem;color:#475569;">Estimasi beban: {dl_str}</span>'
                 + '</div>'
-                for ln in lines
+                + advice_html
+                + '</div>',
+                unsafe_allow_html=True
             )
-            advice_html = f'<div style="margin-top:12px;">{items_html}</div>'
-        else:
-            advice_html = f'<div class="ai-advice">{advice}</div>'
-
-        st.markdown(
-            '<div class="ai-card">'
-            + '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px;">'
-            + f'<span class="ai-unit-badge" style="color:{color};">⚡ {unit}</span>'
-            + f'<span class="badge" style="background:{color}22;color:{color};border:1px solid {color}44;">{status}</span>'
-            + f'<span style="font-family:\'IBM Plex Mono\',monospace;font-size:0.72rem;color:#475569;">Estimasi beban: {dl_str}</span>'
-            + '</div>'
-            + advice_html
-            + '</div>',
-            unsafe_allow_html=True
-        )
+else:
+    with ai_placeholder.container():
+        st.info("💡 Tekan tombol di atas untuk menjalankan analisis AI.")
 
 # ── FOOTER ────────────────────────────────────────────────────────
 st.markdown(
