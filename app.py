@@ -160,57 +160,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600;700&display=swap');
-html, body, [class*="css"] { font-family: 'IBM Plex Sans', sans-serif; background-color: #0a0e1a; color: #e2e8f0; }
-.stApp { background-color: #0a0e1a; }
-.header-band {
-    background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
-    border: 1px solid #1e3a5f; border-radius: 12px; padding: 28px 36px; margin-bottom: 24px;
-    position: relative; overflow: hidden;
-}
-.header-band::before {
-    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
-    background: linear-gradient(90deg, #3b82f6, #06b6d4, #3b82f6);
-}
-.header-title { font-family: 'IBM Plex Mono', monospace; font-size: 1.6rem; font-weight: 600; color: #e2e8f0; margin: 0; }
-.header-sub   { font-size: 0.85rem; color: #64748b; margin: 6px 0 0; font-family: 'IBM Plex Mono', monospace; letter-spacing: 0.5px; }
-.ts-badge {
-    display: inline-block; background: #1e3a5f; color: #60a5fa;
-    font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem;
-    padding: 4px 10px; border-radius: 20px; margin-top: 10px; border: 1px solid #2d4f7c;
-}
-.card {
-    background: #0f172a; border: 1px solid #1e293b; border-radius: 10px;
-    padding: 20px; margin-bottom: 16px; position: relative; overflow: hidden;
-}
-.card-accent { position: absolute; top: 0; left: 0; width: 4px; height: 100%; border-radius: 10px 0 0 10px; }
-.card-unit   { font-family: 'IBM Plex Mono', monospace; font-size: 1.1rem; font-weight: 600; color: #e2e8f0; margin-bottom: 4px; }
-.card-val    { font-size: 2rem; font-weight: 700; font-family: 'IBM Plex Mono', monospace; line-height: 1.1; }
-.card-sub    { font-size: 0.75rem; color: #64748b; margin-top: 4px; font-family: 'IBM Plex Mono', monospace; }
-.badge {
-    display: inline-block; padding: 3px 10px; border-radius: 20px;
-    font-size: 0.72rem; font-weight: 600; font-family: 'IBM Plex Mono', monospace; letter-spacing: 0.5px;
-}
-.eoh-bar-bg   { background: #1e293b; border-radius: 4px; height: 8px; margin: 8px 0 4px; overflow: hidden; }
-.eoh-bar-fill { height: 100%; border-radius: 4px; }
-.section-title {
-    font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; color: #475569;
-    letter-spacing: 2px; text-transform: uppercase; margin: 24px 0 12px;
-    padding-bottom: 6px; border-bottom: 1px solid #1e293b;
-}
-.ai-card { background: #0f172a; border: 1px solid #1e3a5f; border-radius: 10px; padding: 20px 24px; margin-bottom: 12px; }
-.ai-unit-badge { font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; font-weight: 600; letter-spacing: 1px; }
-.ai-advice { font-size: 0.9rem; color: #cbd5e1; line-height: 1.6; margin-top: 8px; }
-div[data-testid="stButton"] button {
-    background: linear-gradient(135deg, #1d4ed8, #1e40af); color: white; border: none;
-    border-radius: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 0.85rem;
-    padding: 12px 28px; width: 100%;
-}
-</style>
-""", unsafe_allow_html=True)
-
 # ── LOAD DATA ──────────────────────────────────────────────────────
 @st.cache_data(ttl=300)
 def load_data():
