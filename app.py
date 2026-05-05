@@ -21,16 +21,77 @@ WIB = timezone(timedelta(hours=7))
 # EOH Milestone PLN MCTN
 MILESTONE = {"CI": 15984, "HGPI": 31968, "MO": 63936}
 
+# Penyesuaian Warna Status agar kontras di tema terang
 STATUS_COLOR = {
-    "AMAN":        "#22c55e",
-    "WARNING":     "#f59e0b",
-    "KRITIS":      "#ef4444",
-    "MAINTENANCE": "#3b82f6",
-    "DATA MINIM":  "#6b7280",
-    "OFF / TRIP":  "#6b7280",
+    "AMAN":        "#16a34a", # Hijau lebih tua
+    "WARNING":     "#d97706", # Oranye lebih tua
+    "KRITIS":      "#dc2626", # Merah lebih tua
+    "MAINTENANCE": "#2563eb", # Biru royal
+    "DATA MINIM":  "#4b5563",
+    "OFF / TRIP":  "#4b5563",
 }
 
-# ── HELPERS ────────────────────────────────────────────────────────
+# ── CSS TEMA TERANG (LIGHT MODE) ───────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600;700&display=swap');
+html, body, [class*="css"] { font-family: 'IBM Plex Sans', sans-serif; background-color: #ffffff; color: #1e293b; }
+.stApp { background-color: #f8fafc; }
+
+.header-band {
+    background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 50%, #f1f5f9 100%);
+    border: 1px solid #cbd5e1; border-radius: 12px; padding: 28px 36px; margin-bottom: 24px;
+    position: relative; overflow: hidden;
+}
+.header-band::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, #3b82f6, #06b6d4, #3b82f6);
+}
+.header-title { font-family: 'IBM Plex Mono', monospace; font-size: 1.6rem; font-weight: 600; color: #0f172a; margin: 0; }
+.header-sub   { font-size: 0.85rem; color: #64748b; margin: 6px 0 0; font-family: 'IBM Plex Mono', monospace; letter-spacing: 0.5px; }
+.ts-badge {
+    display: inline-block; background: #e0f2fe; color: #0369a1;
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem;
+    padding: 4px 10px; border-radius: 20px; margin-top: 10px; border: 1px solid #bae6fd;
+}
+
+.card {
+    background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px;
+    padding: 20px; margin-bottom: 16px; position: relative; overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.card-accent { position: absolute; top: 0; left: 0; width: 4px; height: 100%; border-radius: 10px 0 0 10px; }
+.card-unit   { font-family: 'IBM Plex Mono', monospace; font-size: 1.1rem; font-weight: 600; color: #334155; margin-bottom: 4px; }
+.card-val    { font-size: 2rem; font-weight: 700; font-family: 'IBM Plex Mono', monospace; line-height: 1.1; }
+.card-sub    { font-size: 0.75rem; color: #64748b; margin-top: 4px; font-family: 'IBM Plex Mono', monospace; }
+
+.badge {
+    display: inline-block; padding: 3px 10px; border-radius: 20px;
+    font-size: 0.72rem; font-weight: 600; font-family: 'IBM Plex Mono', monospace; letter-spacing: 0.5px;
+}
+
+.eoh-bar-bg   { background: #f1f5f9; border-radius: 4px; height: 8px; margin: 8px 0 4px; overflow: hidden; }
+.eoh-bar-fill { height: 100%; border-radius: 4px; }
+
+.section-title {
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; color: #94a3b8;
+    letter-spacing: 2px; text-transform: uppercase; margin: 24px 0 12px;
+    padding-bottom: 6px; border-bottom: 1px solid #f1f5f9;
+}
+
+.ai-card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px 24px; margin-bottom: 12px; }
+.ai-unit-badge { font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; font-weight: 600; letter-spacing: 1px; }
+.ai-advice { font-size: 0.9rem; color: #334155; line-height: 1.6; margin-top: 8px; }
+
+div[data-testid="stButton"] button {
+    background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; border: none;
+    border-radius: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 0.85rem;
+    padding: 12px 28px; width: 100%;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ── HELPERS (LOGIKA TIDAK BERUBAH) ──────────────────────────────────
 def now_wib():
     return datetime.now(WIB).replace(tzinfo=None)
 
@@ -46,7 +107,6 @@ def parse_tgl(s):
     return None
 
 def ekstrak_eoh(keterangan):
-    """Ekstrak angka EOH dari string seperti '40,760 EOH (127%)'"""
     if not keterangan or str(keterangan).strip() in ["", "-", "nan"]:
         return None
     m = re.search(r"([\d,\.]+)\s*EOH", str(keterangan), re.IGNORECASE)
@@ -68,7 +128,6 @@ def hitung_eoh(unit, df_jadwal):
     uj = uj.dropna(subset=["_startup"]).sort_values("_startup", ascending=False)
     last = uj.iloc[0]
 
-    # EOH saat masuk maintenance terakhir (dari keterangan_scope)
     eoh_base = ekstrak_eoh(last.get("keterangan_scope", ""))
     if eoh_base is None:
         raw = str(last.get("target_EOH", "0")).strip().replace(",", "").replace(".", "")
@@ -81,7 +140,6 @@ def hitung_eoh(unit, df_jadwal):
     hari_jalan  = max(0, (today - startup_dt).days)
     current_eoh = round(eoh_base + hari_jalan * 24)
 
-    # Jadwal maintenance berikutnya (tanggal_shut_down > hari ini)
     jadwal_depan = uj[
         uj["_shutdown"].apply(lambda d: d is not None and d > today)
     ].sort_values("_shutdown")
@@ -95,7 +153,6 @@ def hitung_eoh(unit, df_jadwal):
         next_maint_type = str(nxt.get("jenis_maintenance", "N/A"))
         sisa_hari       = max(0, (next_maint_date - today).days)
 
-    # Progress bar: % menuju jadwal berikutnya berdasarkan milestone interval
     if "Major" in next_maint_type or "MO" in next_maint_type:
         ms_val = MILESTONE["MO"]
     elif "HGPI" in next_maint_type or "Hot Gas" in next_maint_type:
@@ -110,7 +167,7 @@ def hitung_eoh(unit, df_jadwal):
     else:
         persen = 0
 
-    bar_color = "#ef4444" if persen >= 85 else "#f59e0b" if persen >= 65 else "#22c55e"
+    bar_color = "#dc2626" if persen >= 85 else "#d97706" if persen >= 65 else "#16a34a"
 
     return {
         "unit":             unit,
@@ -152,13 +209,6 @@ def hitung_batas_hrsg(df, col):
     if len(y) < 3:
         return BATAS_HRSG_FALLBACK
     return max(BATAS_HRSG_FALLBACK, round(y.mean() - y.std(), 0))
-
-# ── PAGE CONFIG ────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="PLN MCTN — Predictive Maintenance",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
 
 # ── LOAD DATA ──────────────────────────────────────────────────────
 @st.cache_data(ttl=300)
@@ -254,11 +304,10 @@ for i, (name, col) in enumerate(units_ct.items()):
     slope_str = f"&nbsp;|&nbsp;Slope: {slope_val} MW/hari" if slope_val != 0 else ""
     sub_str   = f"Estimasi: {dl_str}{slope_str}"
 
-    # EOH bar — pure string concat, no nested f-string conditionals
     eoh_html = ""
     if eoh:
         pct       = eoh.get("persentase", 0)
-        bar_color = eoh.get("bar_color", "#22c55e")
+        bar_color = eoh.get("bar_color", "#16a34a")
         cur_eoh   = eoh.get("current_EOH", 0)
         ms_type   = eoh.get("next_ms_type", "N/A")
         ndate     = eoh.get("next_maint_date", "N/A")
@@ -322,7 +371,7 @@ for i, (name, col) in enumerate(units_hrsg.items()):
             unsafe_allow_html=True
         )
 
-# ── SECTION 3: GRAFIK TREN ────────────────────────────────────────
+# ── SECTION 3: GRAFIK TREN (PERUBAHAN TEMA GRAFIK) ────────────────
 st.markdown('<p class="section-title">// ANALISIS TREN BEBAN</p>', unsafe_allow_html=True)
 
 def buat_grafik(df, col, name, batas, color, result):
@@ -336,17 +385,24 @@ def buat_grafik(df, col, name, batas, color, result):
         active_idx = [j for j, v in enumerate(y_all) if v > 0]
         if len(active_idx) == len(y_trend):
             fig.add_trace(go.Scatter(x=active_idx, y=y_trend, name="Tren",
-                                     line=dict(color="#f59e0b", width=2, dash="dot")))
-    fig.add_hline(y=batas, line_dash="dash", line_color="#ef4444",
+                                     line=dict(color="#d97706", width=2, dash="dot")))
+    fig.add_hline(y=batas, line_dash="dash", line_color="#dc2626",
                   annotation_text=f"Batas {batas}", annotation_position="top right")
+    
+    # Update Layout untuk Tema Terang agar Legend 'Aktual' dan 'Tren' nampak
     fig.update_layout(
-        paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
-        font=dict(family="IBM Plex Mono", color="#94a3b8", size=11),
-        title=dict(text=f"Tren Beban {name}", font=dict(color="#e2e8f0", size=14)),
+        paper_bgcolor="rgba(0,0,0,0)", # Transparan agar ikut warna kartu
+        plot_bgcolor="#ffffff", 
+        font=dict(family="IBM Plex Mono", color="#334155", size=11), # Teks Gelap
+        title=dict(text=f"Tren Beban {name}", font=dict(color="#0f172a", size=14)),
         height=280, margin=dict(l=10, r=10, t=40, b=10),
-        legend=dict(bgcolor="#0f172a", bordercolor="#1e293b"),
-        xaxis=dict(gridcolor="#1e293b", showgrid=True),
-        yaxis=dict(gridcolor="#1e293b", showgrid=True),
+        legend=dict(
+            bgcolor="rgba(255,255,255,0.7)", 
+            bordercolor="#e2e8f0",
+            font=dict(color="#1e293b") # Memastikan teks Aktual/Tren terlihat
+        ),
+        xaxis=dict(gridcolor="#f1f5f9", showgrid=True, zeroline=False),
+        yaxis=dict(gridcolor="#f1f5f9", showgrid=True, zeroline=False),
     )
     return fig
 
@@ -357,7 +413,7 @@ with tab1:
         if col in df.columns:
             with cc[i]:
                 st.plotly_chart(buat_grafik(df, col, name, BATAS_MW,
-                    STATUS_COLOR.get(results.get(name, {}).get("status", ""), "#3b82f6"),
+                    STATUS_COLOR.get(results.get(name, {}).get("status", ""), "#2563eb"),
                     results.get(name, {})), use_container_width=True)
 with tab2:
     hc = st.columns(3)
@@ -365,7 +421,7 @@ with tab2:
         if col in df.columns:
             with hc[i]:
                 st.plotly_chart(buat_grafik(df, col, name, hitung_batas_hrsg(df, col),
-                    STATUS_COLOR.get(results.get(name, {}).get("status", ""), "#06b6d4"),
+                    STATUS_COLOR.get(results.get(name, {}).get("status", ""), "#0891b2"),
                     results.get(name, {})), use_container_width=True)
 
 # ── SECTION 4: AI ADVISOR ─────────────────────────────────────────
@@ -406,7 +462,7 @@ with col_btn2:
         st.rerun()
 
 if run_ai:
-    with st.spinner("AI sedang menganalisis kondisi unit dan laporan operasional..."):
+    with st.spinner("AI sedang menganalisis kondisi unit..."):
         try:
             payload = {
                 "timestamp":      datetime.now(WIB).strftime("%Y-%m-%d %H:%M"),
@@ -423,7 +479,6 @@ if run_ai:
         except Exception as e:
             st.error(f"Koneksi ke n8n gagal: {e}")
 
-# Placeholder permanen untuk hasil AI
 ai_placeholder = st.empty()
 
 if st.session_state.ai_results:
@@ -443,7 +498,7 @@ if st.session_state.ai_results:
 
             if len(lines) > 1:
                 items_html = "".join(
-                    '<div style="display:flex;gap:8px;margin-bottom:6px;">'
+                    '<div style="display:flex;gap:8px;margin-bottom:6px;font-size:0.9rem;color:#334155;">'
                     + f'<span style="color:{color};flex-shrink:0;">▸</span>'
                     + f'<span>{ln}{"." if not ln.endswith(".") else ""}</span>'
                     + '</div>'
@@ -458,7 +513,7 @@ if st.session_state.ai_results:
                 + '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px;">'
                 + f'<span class="ai-unit-badge" style="color:{color};">⚡ {unit}</span>'
                 + f'<span class="badge" style="background:{color}22;color:{color};border:1px solid {color}44;">{status}</span>'
-                + f'<span style="font-family:\'IBM Plex Mono\',monospace;font-size:0.72rem;color:#475569;">Estimasi beban: {dl_str}</span>'
+                + f'<span style="font-family:\'IBM Plex Mono\',monospace;font-size:0.72rem;color:#64748b;">Estimasi beban: {dl_str}</span>'
                 + '</div>'
                 + advice_html
                 + '</div>',
@@ -471,7 +526,7 @@ else:
 # ── FOOTER ────────────────────────────────────────────────────────
 st.markdown(
     '<div style="text-align:center;padding:24px 0 8px;font-family:\'IBM Plex Mono\',monospace;'
-    'font-size:0.7rem;color:#334155;border-top:1px solid #1e293b;margin-top:32px;">'
+    'font-size:0.7rem;color:#94a3b8;border-top:1px solid #f1f5f9;margin-top:32px;">'
     'PLN MCTN Predictive Maintenance System — Developed for KP Project'
     '</div>',
     unsafe_allow_html=True
