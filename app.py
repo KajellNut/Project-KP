@@ -210,6 +210,13 @@ def hitung_batas_hrsg(df, col):
         return BATAS_HRSG_FALLBACK
     return max(BATAS_HRSG_FALLBACK, round(y.mean() - y.std(), 0))
 
+# ── PAGE CONFIG ────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="PLN MCTN — Predictive Maintenance",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
 # ── LOAD DATA ──────────────────────────────────────────────────────
 @st.cache_data(ttl=300)
 def load_data():
